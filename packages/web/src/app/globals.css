@@ -1,0 +1,152 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-outfit: 'Outfit', system-ui, sans-serif;
+  --font-geist-mono: 'JetBrains Mono', monospace;
+}
+
+body {
+  font-family: var(--font-outfit);
+  background: #0a0a0f;
+  color: #e4e4e7;
+  min-height: 100vh;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #12121a;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #252532;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #303040;
+}
+
+/* Glowing effects */
+.glow-cyan {
+  box-shadow: 0 0 20px rgba(0, 245, 212, 0.3);
+}
+
+.glow-pink {
+  box-shadow: 0 0 20px rgba(247, 37, 133, 0.3);
+}
+
+.glow-purple {
+  box-shadow: 0 0 20px rgba(114, 9, 183, 0.3);
+}
+
+/* Glass morphism */
+.glass {
+  background: rgba(18, 18, 26, 0.8);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* Gradient text */
+.gradient-text {
+  background: linear-gradient(135deg, #00f5d4, #7209b7);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Animated gradient border */
+.gradient-border {
+  position: relative;
+  border-radius: 12px;
+}
+
+.gradient-border::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  background: linear-gradient(135deg, #00f5d4, #7209b7, #f72585);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  padding: 1px;
+  pointer-events: none;
+}
+
+/* Treemap styles */
+.treemap-node {
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.treemap-node:hover {
+  filter: brightness(1.2);
+}
+
+.treemap-delete {
+  fill: #f72585;
+}
+
+.treemap-compress {
+  fill: #fee440;
+}
+
+.treemap-keep {
+  fill: #00f5d4;
+}
+
+.treemap-unknown {
+  fill: #3a3a4a;
+}
+
+/* Pulse animation for processing */
+@keyframes processing-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.processing {
+  animation: processing-pulse 2s ease-in-out infinite;
+}
+
+/* Number formatting */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Scan tab — indeterminate progress bar */
+@keyframes scan-bar-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(280%);
+  }
+}
+
+.scan-progress-indeterminate {
+  width: 42%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(0, 245, 212, 0.25),
+    rgba(0, 245, 212, 0.65),
+    rgba(0, 245, 212, 0.25),
+    transparent
+  );
+  animation: scan-bar-slide 1.35s ease-in-out infinite;
+}

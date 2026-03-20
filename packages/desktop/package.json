@@ -1,0 +1,23 @@
+{
+  "name": "@gdrive-compressor/desktop",
+  "version": "1.0.0",
+  "private": true,
+  "author": "Havard Njastad",
+  "description": "Electron desktop app for Drive Compressor",
+  "main": "main.cjs",
+  "scripts": {
+    "dev": "electron .",
+    "start": "electron .",
+    "bundle:app": "node ./scripts/prepare-bundle.cjs",
+    "dist": "electron-builder --config electron-builder.config.cjs --publish never",
+    "release": "electron-builder --config electron-builder.config.cjs"
+  },
+  "dependencies": {
+    "@gdrive-compressor/api": "workspace:^",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^26.8.1"
+  }
+}
