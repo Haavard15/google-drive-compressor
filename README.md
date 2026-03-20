@@ -10,6 +10,14 @@ A powerful tool for video production companies to analyze, manage, and optimize 
 - **Video Compression**: FFmpeg with **Apple VideoToolbox** (H.265/H.264) on macOS by default; software x265/x264 fallback on other platforms
 - **Real-time Progress**: WebSocket updates for scan and processing progress
 
+## Screenshots
+
+UI captures for docs and sharing live in [`screenshots/`](screenshots/). On the **Overview** tab, enable **Screenshot mode — hide names in Storage Map** to obscure folder and file names for public shots.
+
+![Overview — Storage Map and AI suggestions](screenshots/Screenshot%202026-03-20%20at%2023.59.42.png)
+
+![Google Drive Video Compressor — dashboard](screenshots/Screenshot%202026-03-20%20at%2022.05.56.png)
+
 ## Architecture
 
 ```
@@ -203,6 +211,7 @@ On **macOS**, video uses **VideoToolbox** hardware encoders (`hevc_videotoolbox`
 
 ```
 google-drive-compressor/
+├── screenshots/                # UI screenshots for README / publishing
 ├── packages/
 │   ├── api/                    # Fastify backend
 │   │   ├── src/
