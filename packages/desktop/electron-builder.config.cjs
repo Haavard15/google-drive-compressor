@@ -10,7 +10,10 @@ const macConfig = {
 };
 
 if (process.env.APPLE_SIGNING_IDENTITY) {
-  macConfig.identity = process.env.APPLE_SIGNING_IDENTITY;
+  macConfig.identity = process.env.APPLE_SIGNING_IDENTITY.replace(
+    /^Developer ID Application:\s*/,
+    '',
+  );
 }
 
 module.exports = {
