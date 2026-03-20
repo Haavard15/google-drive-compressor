@@ -23,8 +23,10 @@ jobs:
         include:
           - os: macos-latest
             artifact_name: desktop-macos
+            artifact_glob: packages/desktop/dist/*.dmg
           - os: windows-latest
             artifact_name: desktop-windows
+            artifact_glob: packages/desktop/dist/*.exe
 
     runs-on: ${{ matrix.os }}
 
@@ -96,7 +98,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
-          path: packages/desktop/dist/*
+          path: ${{ matrix.artifact_glob }}
           if-no-files-found: error
 
   publish-release:
@@ -114,5 +116,7 @@ jobs:
       - name: Publish GitHub release assets
         uses: softprops/action-gh-release@v2
         with:
-          files: release-artifacts/**/*
+          files: |
+            release-artifacts/desktop-macos/*.dmg
+            release-artifacts/desktop-windows/*.exe
           generate_release_notes: true
