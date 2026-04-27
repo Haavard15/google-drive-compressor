@@ -7,7 +7,7 @@ const configSchema = z.object({
   // Server
   PORT: z.coerce.number().default(3001),
   HOST: z.string().default('0.0.0.0'),
-  DASHBOARD_URL: z.string().default('http://localhost:3000'),
+  DASHBOARD_URL: z.string().default('http://localhost:3010'),
   /** Application + Fastify (pino) verbosity: silent | error | warn | info | debug */
   LOG_LEVEL: z.enum(['silent', 'error', 'warn', 'info', 'debug']).default('warn'),
 
@@ -36,7 +36,7 @@ const configSchema = z.object({
   MAX_CONCURRENT_UPLOADS: z.coerce.number().default(1),
   /** Parallel FFmpeg encode jobs (downloads/uploads stay serialized) */
   MAX_PARALLEL_ENCODES: z.coerce.number().default(2),
-  MAX_DISK_USAGE_GB: z.coerce.number().default(128),
+  MAX_DISK_USAGE_GB: z.coerce.number().default(1000),
 });
 
 export const config = configSchema.parse(process.env);

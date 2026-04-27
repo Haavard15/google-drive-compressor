@@ -81,6 +81,8 @@ export type ProgressExtras = {
   phase?: JobPhase;
   bytesDone?: number;
   bytesTotal?: number;
+  /** Wall-clock seconds remaining (e.g. compress extrapolation from FFmpeg %). */
+  etaSeconds?: number;
 };
 
 type ProgressCallback = (
@@ -103,6 +105,48 @@ function formatXferBytes(n: number): string {
   return `${n} B`;
 }
 
+const ETA_MAX_SEC = 48 * 3600;
+
+function formatEtaRemaining(sec: number): string {
+  const s = Math.max(1, Math.round(sec));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const rem = s % 60;
+  if (m < 60) return rem > 0 ? `${m}m ${rem}s` : `${m}m`;
+  const h = Math.floor(m / 60);
+  const mm = m % 60;
+  return mm > 0 ? `${h}h ${mm}m` : `${h}h`;
+}
+
+function appendEtaSuffix(
+  line: string,
+  extras: ProgressExtras | undefined,
+  speed?: number
+): string {
+  const phase = extras?.phase;
+  const done = extras?.bytesDone ?? 0;
+  const total = extras?.bytesTotal ?? 0;
+  let etaSec: number | undefined;
+
+  if (phase === 'download' || phase === 'upload') {
+    if (total > 0 && done < total && speed != null && speed > 0) {
+      etaSec = (total - done) / speed;
+    }
+  } else if (phase === 'compress' && extras?.etaSeconds != null) {
+    etaSec = extras.etaSeconds;
+  }
+
+  if (
+    etaSec == null ||
+    !Number.isFinite(etaSec) ||
+    etaSec < 1 ||
+    etaSec > ETA_MAX_SEC
+  ) {
+    return line;
+  }
+  return `${line} · ~${formatEtaRemaining(etaSec)} left`;
+}
+
 function buildStatusLine(
   extras: ProgressExtras | undefined,
   status: string,
@@ -114,16 +158,19 @@ function buildStatusLine(
   const done = extras?.bytesDone ?? 0;
   const total = extras?.bytesTotal ?? 0;
 
+  let core: string;
   if ((phase === 'download' || phase === 'upload') && total > 0) {
     const pct = Math.min(100, Math.round((done / total) * 100));
     const label = phase === 'download' ? 'Downloading' : 'Uploading';
-    return `${label} ${formatXferBytes(done)} / ${formatXferBytes(total)} (${pct}%)${sp}`;
-  }
-  if ((phase === 'download' || phase === 'upload') && total <= 0) {
+    core = `${label} ${formatXferBytes(done)} / ${formatXferBytes(total)} (${pct}%)${sp}`;
+  } else if ((phase === 'download' || phase === 'upload') && total <= 0) {
     const label = phase === 'download' ? 'Downloading' : 'Uploading';
-    return `${label}… ${status.replace(/^.*\.\.\.\s*/, '')}${sp}`.trim();
+    core = `${label}… ${status.replace(/^.*\.\.\.\s*/, '')}${sp}`.trim();
+  } else {
+    core = `${status}${sp}`;
   }
-  return `${status}${sp}`;
+
+  return appendEtaSuffix(core, extras, speed);
 }
 
 export async function emitProgress(

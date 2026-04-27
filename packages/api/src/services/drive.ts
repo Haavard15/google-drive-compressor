@@ -284,6 +284,10 @@ export async function downloadFile(
     
     stream.on('error', (err: Error) => {
       log.error(`Download error at ${(downloadedSize / 1024 / 1024).toFixed(0)} MB:`, err.message);
+      const body = (err as { response?: { data?: unknown } })?.response?.data;
+      if (body != null) {
+        log.warn('Drive download error body:', JSON.stringify(body));
+      }
       dest.end();
       finish(() =>
         signal?.aborted ? reject(new JobCancelledError()) : reject(err)
@@ -370,6 +374,10 @@ export async function uploadFile(
   } catch (err) {
     if (signal?.aborted) {
       throw new JobCancelledError();
+    }
+    const body = (err as { response?: { data?: unknown } })?.response?.data;
+    if (body != null) {
+      log.warn('Drive upload error:', JSON.stringify(body));
     }
     throw err;
   } finally {

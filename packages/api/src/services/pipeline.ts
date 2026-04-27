@@ -324,10 +324,12 @@ async function failAction(
   actionId: number,
   fileId: string | null,
   error: unknown,
-  opts?: { cancelled?: boolean },
+  opts?: { cancelled?: boolean; keepLocalCompressFiles?: boolean },
 ): Promise<void> {
   const db = getDb();
-  await cleanupTempArtifacts(actionId, fileId);
+  await cleanupTempArtifacts(actionId, fileId, {
+    keepCompressInputsOutputs: opts?.keepLocalCompressFiles === true,
+  });
   clearJobCancelHandler(actionId);
   downloadAbortByAction.delete(actionId);
   encodeAbortByAction.delete(actionId);
@@ -350,12 +352,24 @@ async function failAction(
     await emitProgress(actionId, 0, 'Cancelled', undefined, { phase: 'finalize' });
   } else {
     const msg = error instanceof Error ? error.message : 'Unknown error';
+    let metadataJson: string | undefined;
+    if (opts?.keepLocalCompressFiles) {
+      const [prev] = await db
+        .select({ metadata: schema.actions.metadata })
+        .from(schema.actions)
+        .where(eq(schema.actions.id, actionId));
+      metadataJson = mergeActionMeta(prev?.metadata ?? null, {
+        resumeMessage:
+          'Compress output (and source, if present) kept under temp dir after upload/Drive error — use Re-queue to retry without re-encoding.',
+      });
+    }
     await db
       .update(schema.actions)
       .set({
         status: 'failed',
         error: msg,
         completedAt: new Date(),
+        ...(metadataJson ? { metadata: metadataJson } : {}),
       })
       .where(eq(schema.actions.id, actionId));
     if (fileId) {
@@ -368,16 +382,19 @@ async function failAction(
   await startNextPendingIfIdle();
 }
 
-async function cleanupTempArtifacts(actionId: number, fileId: string | null): Promise<void> {
+async function cleanupTempArtifacts(
+  actionId: number,
+  fileId: string | null,
+  opts?: { keepCompressInputsOutputs?: boolean },
+): Promise<void> {
   if (!fileId) return;
   const db = getDb();
   const [file] = await db.select().from(schema.files).where(eq(schema.files.id, fileId));
   if (!file) return;
-  const paths = [
-    compressInputPath(file),
-    compressOutputPath(file),
-    downloadOnlyPath(actionId, file),
-  ];
+  const paths =
+    opts?.keepCompressInputsOutputs === true
+      ? [downloadOnlyPath(actionId, file)]
+      : [compressInputPath(file), compressOutputPath(file), downloadOnlyPath(actionId, file)];
   for (const p of paths) {
     try {
       if (existsSync(p)) unlinkSync(p);
@@ -431,6 +448,8 @@ async function downloadWorkerTick(): Promise<void> {
         const totalBytes = row.file.size ?? 0;
 
         if (isDownloadedFileComplete(inputPath, totalBytes)) {
+          const outputPath = compressOutputPath(row.file);
+          const outputReady = isEncodedOutputPresent(outputPath, totalBytes);
           let inputSz = 0;
           try {
             inputSz = statSync(inputPath).size;
@@ -441,29 +460,66 @@ async function downloadWorkerTick(): Promise<void> {
             .select({ metadata: schema.actions.metadata })
             .from(schema.actions)
             .where(eq(schema.actions.id, id));
-          await db
-            .update(schema.actions)
-            .set({
-              status: 'ready_to_encode',
-              progress: 30,
-              metadata: mergeActionMeta(mSkip?.metadata ?? null, {
-                resumeMessage: `Skipped re-download — local input already present (${inputSz} B)`,
-                stage: 'download',
-                stageData: {
-                  completedAt: new Date().toISOString(),
-                  skippedRedownload: true,
-                  bytes: inputSz,
-                },
-              }),
-            })
-            .where(eq(schema.actions.id, id));
-          await emitProgress(
-            id,
-            30,
-            'Resumed: local file present · waiting for encoder',
-            undefined,
-            { phase: 'compress' },
-          );
+          if (outputReady) {
+            let outSz = 0;
+            try {
+              outSz = statSync(outputPath).size;
+            } catch {
+              /* ignore */
+            }
+            const ratio =
+              totalBytes && totalBytes > 0
+                ? (((totalBytes - outSz) / totalBytes) * 100).toFixed(1)
+                : '?';
+            await db
+              .update(schema.actions)
+              .set({
+                status: 'ready_to_upload',
+                progress: 75,
+                metadata: mergeActionMeta(mSkip?.metadata ?? null, {
+                  resumeMessage: `Skipped re-download/re-encode — compressed output already present (${outSz} B)`,
+                  stage: 'encode',
+                  stageData: {
+                    completedAt: new Date().toISOString(),
+                    skippedReencode: true,
+                    outputBytes: outSz,
+                    ratioPctApprox: ratio,
+                  },
+                }),
+              })
+              .where(eq(schema.actions.id, id));
+            await emitProgress(
+              id,
+              75,
+              `Resumed: encoded file on disk (~${ratio}% smaller vs source) · waiting for upload slot`,
+              undefined,
+              { phase: 'upload', bytesDone: 0, bytesTotal: outSz },
+            );
+          } else {
+            await db
+              .update(schema.actions)
+              .set({
+                status: 'ready_to_encode',
+                progress: 30,
+                metadata: mergeActionMeta(mSkip?.metadata ?? null, {
+                  resumeMessage: `Skipped re-download — local input already present (${inputSz} B)`,
+                  stage: 'download',
+                  stageData: {
+                    completedAt: new Date().toISOString(),
+                    skippedRedownload: true,
+                    bytes: inputSz,
+                  },
+                }),
+              })
+              .where(eq(schema.actions.id, id));
+            await emitProgress(
+              id,
+              30,
+              'Resumed: local file present · waiting for encoder',
+              undefined,
+              { phase: 'compress' },
+            );
+          }
         } else {
           if (existsSync(inputPath)) {
             try {
@@ -542,6 +598,7 @@ async function downloadWorkerTick(): Promise<void> {
         const destPath = downloadOnlyPath(id, row.file);
         const totalBytes = row.file.size ?? 0;
         let lastDl = Date.now();
+        let lastDlBytes = 0;
         await emitProgress(
           id,
           0,
@@ -554,13 +611,17 @@ async function downloadWorkerTick(): Promise<void> {
           destPath,
           (progress, downloadedBytes) => {
             const now = Date.now();
-            if (now - lastDl < 800) return;
+            const dt = (now - lastDl) / 1000;
+            const db = downloadedBytes - lastDlBytes;
+            const speed = dt > 0 ? db / dt : 0;
+            if (dt < 1) return;
             lastDl = now;
+            lastDlBytes = downloadedBytes;
             void emitProgress(
               id,
               progress,
               `Downloading… ${progress}%`,
-              undefined,
+              speed > 0 ? speed : undefined,
               {
                 phase: 'download',
                 bytesDone: downloadedBytes,
@@ -703,6 +764,7 @@ async function runEncodeJob(action: Action, file: File): Promise<void> {
   rewirePipelineCancel(id);
 
   try {
+    const encodeWallStart = Date.now();
     let lastCompressUpdate = Date.now();
     await compressWithFFmpeg(
       inputPath,
@@ -711,12 +773,22 @@ async function runEncodeJob(action: Action, file: File): Promise<void> {
       (progress) => {
         const now = Date.now();
         if (now - lastCompressUpdate >= 2000) {
+          const elapsedSec = (now - encodeWallStart) / 1000;
+          let etaSeconds: number | undefined;
+          if (progress >= 3 && progress < 99 && elapsedSec >= 2) {
+            etaSeconds = ((100 - progress) / progress) * elapsedSec;
+          }
           void emitProgress(
             id,
             35 + Math.round(progress * 0.35),
             `Compressing… ${progress}%`,
             undefined,
-            { phase: 'compress' },
+            {
+              phase: 'compress',
+              ...(etaSeconds != null && Number.isFinite(etaSeconds)
+                ? { etaSeconds }
+                : {}),
+            },
             jobFields,
           );
           lastCompressUpdate = now;
@@ -960,9 +1032,12 @@ async function uploadWorkerTick(): Promise<void> {
       await startNextPendingIfIdle();
     } catch (e) {
       if (e instanceof JobCancelledError || ac.signal.aborted) {
-        await failAction(id, row.action.fileId, e, { cancelled: true });
+        await failAction(id, row.action.fileId, e, {
+          cancelled: true,
+          keepLocalCompressFiles: true,
+        });
       } else {
-        await failAction(id, row.action.fileId, e);
+        await failAction(id, row.action.fileId, e, { keepLocalCompressFiles: true });
       }
     } finally {
       uploadAbortByAction.delete(id);
@@ -1059,13 +1134,25 @@ async function reconcileOneCompressAction(action: Action, file: File): Promise<b
       progress = 0;
       resumeMessage = 'Recovered: upload interrupted, no local artifacts → download_queued';
     }
+  } else if (st === 'failed') {
+    if (outputOk) {
+      newStatus = 'ready_to_upload';
+      progress = 75;
+      resumeMessage =
+        'Recovered: failed after encode or during upload — compressed file still on disk → ready_to_upload';
+    } else if (inputOk) {
+      newStatus = 'ready_to_encode';
+      progress = 30;
+      resumeMessage = 'Recovered: failed with source on disk, no output → ready_to_encode';
+    }
   }
 
   if (!newStatus) return false;
 
   const annotateDownloadRecovered =
     (st === 'download_queued' || st === 'downloading') && inputOk && newStatus === 'ready_to_encode';
-  const annotateEncodeRecovered = st === 'uploading' && outputOk && newStatus === 'ready_to_upload';
+  const annotateEncodeRecovered =
+    (st === 'uploading' || st === 'failed') && outputOk && newStatus === 'ready_to_upload';
 
   const metadata = mergeActionMeta(action.metadata, {
     resumeMessage,
@@ -1169,7 +1256,7 @@ async function reconcileOneDownloadOnlyAction(action: Action, file: File): Promi
  */
 export async function recoverOrphanedPipelineJobs(): Promise<{ examined: number; resumed: number }> {
   const db = getDb();
-  const rows = await db
+  const pipelineRows = await db
     .select({
       action: schema.actions,
       file: schema.files,
@@ -1182,6 +1269,17 @@ export async function recoverOrphanedPipelineJobs(): Promise<{ examined: number;
         inArray(schema.actions.action, ['compress', 'download']),
       ),
     );
+
+  const failedCompressRows = await db
+    .select({
+      action: schema.actions,
+      file: schema.files,
+    })
+    .from(schema.actions)
+    .leftJoin(schema.files, eq(schema.actions.fileId, schema.files.id))
+    .where(and(eq(schema.actions.status, 'failed'), eq(schema.actions.action, 'compress')));
+
+  const rows = [...pipelineRows, ...failedCompressRows];
 
   let resumed = 0;
   for (const row of rows) {

@@ -8,7 +8,7 @@ const { pathToFileURL } = require('node:url');
 const WebSocket = require('ws');
 
 const MANAGED_SERVERS = app.isPackaged || process.env.DESKTOP_MANAGED_SERVERS === 'true';
-const DASHBOARD_URL = process.env.DASHBOARD_URL || 'http://localhost:3000';
+const DASHBOARD_URL = process.env.DASHBOARD_URL || 'http://localhost:3010';
 const API_URL = process.env.API_URL || 'http://localhost:3001';
 const OPEN_BROWSER_ON_START = process.env.OPEN_BROWSER_ON_START !== 'false';
 
@@ -455,7 +455,7 @@ async function startManagedWebServer() {
       ...process.env,
       ELECTRON_RUN_AS_NODE: '1',
       NODE_ENV: 'production',
-      PORT: '3000',
+      PORT: '3010',
       HOSTNAME: '127.0.0.1',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
